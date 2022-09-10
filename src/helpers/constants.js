@@ -11,3 +11,7 @@ export const IMG_MAP = {
   marker: Marker,
   pin: Pin,
 };
+
+export const ALLOWED_TYPES = ['image/png', 'image/jpg', 'image/jpeg'];
+
+export const API_URL = 'http://localhost:5000';

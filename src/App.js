@@ -7,12 +7,18 @@ import Stack from 'react-bootstrap/Stack';
 import Form from 'react-bootstrap/Form';
 import Button from 'react-bootstrap/Button';
 import Image from 'react-bootstrap/Image';
+import LoadingBar from 'react-top-loading-bar';
 
 import Color from './components/Color';
-import { $, IMG_MAP } from './helpers/constants';
+import { $, IMG_MAP, ALLOWED_TYPES, API_URL } from './helpers/constants';
 
 function App() {
   const viewMap = useRef(null);
+  const mounted = useRef(false);
+  const loader = useRef(null);
+  const [disabled, setDisabled] = useState(false);
+  const [imgSrc, setImgSrc] = useState('');
+  const [imgHash, setImgHash] = useState(Date.now());
   const [link, setLink] = useState('');
   const [selectedColor, setSelectedColor] = useState('red');
   const [selectedImg, setSelectedImg] = useState('right-arrow');
@@ -29,19 +35,89 @@ function App() {
         stroke: 'red',
         'stroke-width': 2,
       },
-      onSelect(e, data) {
-        console.log(data);
-      },
     });
 
     viewMap.current = $('._image_maps_view');
     viewMap.current.imageMaps();
+
+    if (!mounted.current) loadImg();
+
+    mounted.current = true;
   }, []);
+
+  useEffect(() => {
+    if (imgSrc) loadDB();
+  }, [imgSrc, imgHash]);
 
   const checkColor = (color) => {
     return selectedColor === color
       ? '3px solid black'
       : '3px solid transparent';
+  };
+
+  const findImgName = (base64) => {
+    let name = '';
+    Object.keys(IMG_MAP).forEach((key) => {
+      if (IMG_MAP[key] === base64) {
+        name = key;
+        return;
+      }
+    });
+    return name;
+  };
+
+  const renderShapes = (shapes) => {
+    shapes.forEach((shape) => {
+      switch (shape.type) {
+        case 'circle':
+        case 'rect':
+        case 'ellipse':
+          $('._image_maps')
+            .setShapeStyle({
+              fill: shape.fill,
+              stroke: shape.stroke,
+              'stroke-width': shape['stroke-width'],
+            })
+            .addShape(JSON.parse(shape.coords), shape.link, shape.type);
+          break;
+        case 'text':
+          $('._image_maps')
+            .setTextShape(shape.text, {
+              fill: shape.fill,
+              stroke: '',
+              'stroke-width': '',
+            })
+            .addShape(JSON.parse(shape.coords), shape.link, 'text');
+          break;
+        case 'image':
+          $('._image_maps')
+            .setImageShape(IMG_MAP[shape.imageName])
+            .addShape(JSON.parse(shape.coords), shape.link, 'image');
+          break;
+        default:
+          break;
+      }
+    });
+  };
+
+  const handleImgUpload = async (file) => {
+    if (ALLOWED_TYPES.includes(file.type)) {
+      setDisabled(true);
+      loader.current.continuousStart();
+
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const res = await fetch(`${API_URL}/image`, {
+        method: 'POST',
+        body: formData,
+      }).then((res) => res.json());
+      setImgSrc(res.imagePath);
+      setImgHash(Date.now());
+
+      setDisabled(false);
+      loader.current.complete();
+    }
   };
 
   const handleColor = useCallback((color) => {
@@ -110,16 +186,72 @@ function App() {
     $('._image_maps').copyImageMapsTo($('._image_maps_view'));
   }, []);
 
+  const syncDB = async () => {
+    setDisabled(true);
+    loader.current.continuousStart();
+    const shapes = $('._image_maps').getAllShapes();
+    const mappedShapes = Object.keys(shapes).map((key) => ({
+      type: shapes[key].type,
+      coords: JSON.stringify(shapes[key].coords),
+      fill: shapes[key].style?.fill,
+      stroke: shapes[key].style?.stroke,
+      strokeWidth: shapes[key].style?.['stroke-width']
+        ? parseInt(shapes[key].style['stroke-width'])
+        : null,
+      text: shapes[key].text,
+      link: shapes[key].url,
+      imageName: findImgName(shapes[key].href),
+    }));
+
+    const res = await fetch(`${API_URL}/shape`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shapes: mappedShapes }),
+    }).then((res) => res.json());
+    console.log('ras', res);
+    loader.current.complete();
+    setDisabled(false);
+  };
+
+  const loadDB = async () => {
+    setDisabled(true);
+    loader.current.continuousStart();
+    $('._image_maps').removeAllShapes();
+    viewMap.current.removeAllShapes();
+
+    const res = await fetch(`${API_URL}/shape`).then((res) => res.json());
+    renderShapes(res.shapes);
+
+    loader.current.complete();
+    setDisabled(false);
+  };
+
+  const loadImg = async () => {
+    const imgRes = await fetch(`${API_URL}/image`).then((res) => res.json());
+    setImgSrc(imgRes.imagePath);
+  };
+
   return (
     <>
+      <LoadingBar color="#0d6efd" ref={loader} />
+
       <Navbar bg="dark" variant="dark">
         <Container>
           <Navbar.Brand href="/">Image Maps</Navbar.Brand>
         </Container>
       </Navbar>
 
-      <Container className="mt-5 mb-5" style={{ maxWidth: '720px' }}>
+      <Container className="mt-5" style={{ maxWidth: '720px' }}>
         <Stack gap={4}>
+          <Form.Group>
+            <Form.Label>Upload Image</Form.Label>
+            <Form.Control
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleImgUpload(e.target.files[0])}
+            />
+          </Form.Group>
+
           <Form.Group>
             <Form.Label htmlFor="shapeUrl">1. Shape Url</Form.Label>
             <Form.Control
@@ -127,6 +259,7 @@ function App() {
               id="shapeUrl"
               value={link}
               placeholder="Input your url"
+              disabled={disabled}
               onChange={(e) => setLink(e.target.value)}
             />
           </Form.Group>
@@ -169,16 +302,22 @@ function App() {
           <Form.Group>
             <Form.Label>3. Basic Shape Type</Form.Label>
             <Stack gap={3} direction="horizontal">
-              <Button variant="outline-dark" onClick={handleBasicShape('rect')}>
+              <Button
+                disabled={disabled}
+                variant="outline-dark"
+                onClick={handleBasicShape('rect')}
+              >
                 Add Rectangle
               </Button>
               <Button
+                disabled={disabled}
                 variant="outline-dark"
                 onClick={handleBasicShape('circle')}
               >
                 Add Circle
               </Button>
               <Button
+                disabled={disabled}
                 variant="outline-dark"
                 onClick={handleBasicShape('ellipse')}
               >
@@ -196,6 +335,7 @@ function App() {
                     placeholder="Text Size"
                     type="number"
                     value={textSize}
+                    disabled={disabled}
                     onChange={(e) => setTextSize(e.target.value)}
                   />
                 </Col>
@@ -204,11 +344,16 @@ function App() {
                     placeholder="Some Text"
                     type="text"
                     value={textValue}
+                    disabled={disabled}
                     onChange={(e) => setTextValue(e.target.value)}
                   />
                 </Col>
                 <Col>
-                  <Button variant="light" onClick={handleTextShape}>
+                  <Button
+                    disabled={disabled}
+                    variant="light"
+                    onClick={handleTextShape}
+                  >
                     Add Text
                   </Button>
                 </Col>
@@ -229,6 +374,7 @@ function App() {
                     style={{ width: '45px' }}
                   />
                 }
+                disabled={disabled}
                 checked={selectedImg === 'pin'}
                 onClick={() => handleImg('pin')}
               />
@@ -243,6 +389,7 @@ function App() {
                     style={{ width: '45px' }}
                   />
                 }
+                disabled={disabled}
                 checked={selectedImg === 'marker'}
                 onClick={() => handleImg('marker')}
               />
@@ -257,6 +404,7 @@ function App() {
                     style={{ width: '45px' }}
                   />
                 }
+                disabled={disabled}
                 checked={selectedImg === 'drawing-pin'}
                 onClick={() => handleImg('drawing-pin')}
               />
@@ -271,11 +419,16 @@ function App() {
                     style={{ width: '45px' }}
                   />
                 }
+                disabled={disabled}
                 checked={selectedImg === 'right-arrow'}
                 onClick={() => handleImg('right-arrow')}
               />
 
-              <Button variant="light" onClick={handleImgShape}>
+              <Button
+                disabled={disabled}
+                variant="light"
+                onClick={handleImgShape}
+              >
                 Add Image
               </Button>
             </Stack>
@@ -284,11 +437,26 @@ function App() {
           <div>
             <hr />
             <Stack gap={3} direction="horizontal">
-              <Button variant="outline-warning" onClick={removeShape}>
+              <Button
+                disabled={disabled}
+                variant="outline-warning"
+                onClick={removeShape}
+              >
                 Remove Shape
               </Button>
-              <Button variant="outline-danger" onClick={removeAllShapes}>
+              <Button
+                disabled={disabled}
+                variant="outline-danger"
+                onClick={removeAllShapes}
+              >
                 Remove all Shapes
+              </Button>
+              <Button
+                disabled={disabled}
+                variant="outline-primary"
+                onClick={syncDB}
+              >
+                Sync with DB
               </Button>
             </Stack>
             <hr />
@@ -296,12 +464,7 @@ function App() {
 
           <div className="_imageMaps_area">
             <h5>Edit Image Maps</h5>
-            <Image
-              fluid
-              alt="Jeonju Hanok Village map"
-              src="http://cfile209.uf.daum.net/image/247F194A5234414929344E"
-              className="_image_maps"
-            />
+            <Image fluid src={`${imgSrc}?${imgHash}`} className="_image_maps" />
           </div>
 
           <div className="mt-3">
@@ -310,7 +473,11 @@ function App() {
                 <Stack gap={3} direction="horizontal">
                   <h5 className="m-0">Result</h5>
 
-                  <Button variant="outline-primary" onClick={viewResult}>
+                  <Button
+                    disabled={disabled}
+                    variant="outline-primary"
+                    onClick={viewResult}
+                  >
                     View Result
                   </Button>
                 </Stack>
@@ -322,27 +489,30 @@ function App() {
                     type="number"
                     value={zoom}
                     placeholder="Zoom Percentage"
+                    disabled={disabled}
                     onChange={(e) => setZoom(e.target.value)}
                   />
 
-                  <Button variant="light" onClick={handleZoom}>
+                  <Button
+                    disabled={disabled}
+                    variant="light"
+                    onClick={handleZoom}
+                  >
                     Zoom
                   </Button>
                 </Stack>
               </Col>
             </Row>
           </div>
-
-          <div className="mt-3">
-            <Image
-              fluid
-              alt="Jeonju Hanok Village map"
-              src="http://cfile209.uf.daum.net/image/247F194A5234414929344E"
-              className="_image_maps_view"
-            />
-          </div>
         </Stack>
       </Container>
+      <div className="mt-5 mb-5 mx-auto" style={{ maxWidth: '720px' }}>
+        <img
+          style={{ width: '100%' }}
+          src={`${imgSrc}?${imgHash}`}
+          className="_image_maps_view"
+        />
+      </div>
     </>
   );
 }
