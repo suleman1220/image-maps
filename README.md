@@ -5,7 +5,7 @@
 Go to the project directory
 
 ```bash
-  cd image-map
+  cd image-maps
 ```
 
 Install Dependencies
