@@ -10,15 +10,17 @@ import Image from 'react-bootstrap/Image';
 import LoadingBar from 'react-top-loading-bar';
 
 import Color from './components/Color';
+import useWindowSize from './hooks/useWindowSize';
 import { $, IMG_MAP, ALLOWED_TYPES, API_URL } from './helpers/constants';
 
 function App() {
+  const { width } = useWindowSize();
+
   const viewMap = useRef(null);
   const mounted = useRef(false);
   const loader = useRef(null);
   const [disabled, setDisabled] = useState(false);
   const [imgSrc, setImgSrc] = useState('');
-  const [imgHash, setImgHash] = useState(Date.now());
   const [link, setLink] = useState('');
   const [selectedColor, setSelectedColor] = useState('red');
   const [selectedImg, setSelectedImg] = useState('right-arrow');
@@ -27,27 +29,29 @@ function App() {
   const [zoom, setZoom] = useState('');
 
   useEffect(() => {
-    $('._image_maps').imageMaps({
-      isEditMode: true,
-      shape: 'rect',
-      shapeStyle: {
-        fill: '#ffffff',
-        stroke: 'red',
-        'stroke-width': 2,
-      },
-    });
+    if (!mounted.current) {
+      $('._image_maps').imageMaps({
+        isEditMode: true,
+        shape: 'rect',
+        shapeStyle: {
+          fill: '#ffffff',
+          stroke: 'red',
+          'stroke-width': 2,
+        },
+      });
 
-    viewMap.current = $('._image_maps_view');
-    viewMap.current.imageMaps();
+      viewMap.current = $('._image_maps_view');
+      viewMap.current.imageMaps();
 
-    if (!mounted.current) loadImg();
+      loadImg();
+    }
 
     mounted.current = true;
   }, []);
 
   useEffect(() => {
     if (imgSrc) loadDB();
-  }, [imgSrc, imgHash]);
+  }, [imgSrc]);
 
   const checkColor = (color) => {
     return selectedColor === color
@@ -112,8 +116,7 @@ function App() {
         method: 'POST',
         body: formData,
       }).then((res) => res.json());
-      setImgSrc(res.imagePath);
-      setImgHash(Date.now());
+      setImgSrc(`${res.imagePath}?${Date.now()}`);
 
       setDisabled(false);
       loader.current.complete();
@@ -227,8 +230,8 @@ function App() {
   };
 
   const loadImg = async () => {
-    const imgRes = await fetch(`${API_URL}/image`).then((res) => res.json());
-    setImgSrc(imgRes.imagePath);
+    const res = await fetch(`${API_URL}/image`).then((res) => res.json());
+    setImgSrc(`${res.imagePath}?${Date.now()}`);
   };
 
   return (
@@ -363,7 +366,7 @@ function App() {
 
           <Form.Group>
             <Form.Label>5. Image Shape Type</Form.Label>
-            <Stack gap={3} direction="horizontal">
+            <Stack gap={3} direction={width > 512 ? 'horizontal' : 'vertical'}>
               <Form.Check
                 inline
                 type="radio"
@@ -464,12 +467,12 @@ function App() {
 
           <div className="_imageMaps_area">
             <h5>Edit Image Maps</h5>
-            <Image fluid src={`${imgSrc}?${imgHash}`} className="_image_maps" />
+            <Image fluid src={imgSrc} className="_image_maps" />
           </div>
 
           <div className="mt-3">
             <Row>
-              <Col md="6">
+              <Col md="6" className="mb-3">
                 <Stack gap={3} direction="horizontal">
                   <h5 className="m-0">Result</h5>
 
@@ -509,7 +512,7 @@ function App() {
       <div className="mt-5 mb-5 mx-auto" style={{ maxWidth: '720px' }}>
         <img
           style={{ width: '100%' }}
-          src={`${imgSrc}?${imgHash}`}
+          src={imgSrc}
           className="_image_maps_view"
         />
       </div>
