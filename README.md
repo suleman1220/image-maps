@@ -1,4 +1,6 @@
-# Image Maps
+# Image Maps Frontend
+
+Simple react app for adding custom icons on uploaded images
 
 ## Run Application
 
